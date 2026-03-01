@@ -13,6 +13,7 @@ A personal book collection tracker that evolved through three architectural stag
 - [What the LLM Sees at Each Stage](#what-the-llm-sees-at-each-stage)
 - [Trade-Off Analysis](#trade-off-analysis)
 - [Architecture Comparison](#architecture-comparison)
+- [The Skill Layer](#the-skill-layer)
 - [The Progression in Numbers](#the-progression-in-numbers)
 
 ---
@@ -751,6 +752,59 @@ Stage 3:  1 copy of everything  (config for enums, service for logic)
 
 ---
 
+## The Skill Layer
+
+Stage 3 gives the LLM **capabilities** (9 tools, 3 resources, 2 prompts). The skill layer gives it **domain expertise** — knowing which tool to reach for before it even starts.
+
+```
+.claude/skills/bookshelf/SKILL.md
+```
+
+Invoke it with `/bookshelf` in Claude Code.
+
+### What the Skill Encodes
+
+| Knowledge | Without skill | With skill |
+|-----------|--------------|------------|
+| "I finished X" → which tool? | LLM rediscovers `finish_book` each session | Instant: `search_books` → `finish_book` |
+| Valid status transitions | LLM calls `get_capabilities` or reads `bookshelf://schema` | Inline — no tool call needed |
+| Valid genres/statuses | LLM calls `get_capabilities` to look them up | Inline reference |
+| Error recovery | LLM reads error, reasons about next step | Follow the `recovery` field literally |
+| "What should I read?" | LLM composes `list_books` + manual analysis | Use `recommend-next` prompt directly |
+
+### The Standard Layering
+
+```
+┌─────────────────────────┐
+│  Skill (SKILL.md)       │  ← Domain expertise: intent→tool mapping,
+│  "I finished X" →       │    state machine, workflow recipes
+│  search_books →         │
+│  finish_book            │
+├─────────────────────────┤
+│  MCP Client             │  ← Connection: Claude Code connects to server
+├─────────────────────────┤
+│  MCP Server             │  ← Capabilities: 9 tools, 3 resources, 2 prompts
+│  (src/mcp-server.js)    │
+├─────────────────────────┤
+│  Service Layer          │  ← Business logic: validation, state machine
+│  (src/services/         │
+│   book-service.js)      │
+└─────────────────────────┘
+```
+
+Without the skill, Claude sees 9 disconnected tools and has to rediscover the workflow patterns every conversation. With it, that knowledge is baked in once.
+
+### Skill Contents
+
+- **Intent-to-tool mapping** — 12 common phrases mapped to exact tool sequences
+- **State machine** — all valid transitions with which tool to use, embedded inline
+- **Workflow recipes** — multi-step patterns like "finish book" (2 calls max) and "monthly review" (use the prompt)
+- **Error recovery protocol** — always follow the `recovery` field from error responses
+- **Enum reference** — 3 statuses, 11 genres listed directly so no discovery call is needed
+- **Parameter quick reference** — required vs optional params for all 9 tools
+
+---
+
 ## The Progression in Numbers
 
 | Metric | Stage 1 | Stage 2 | Stage 3 |
@@ -786,4 +840,6 @@ The progression from REST to AI-Native isn't about adding more code — it's abo
 - **Stage 2** copies that logic into MCP tools. Quick to ship, but the LLM carries all the burden.
 - **Stage 3** extracts logic into a service layer and gives the LLM resources (passive context), intent tools (domain operations), and prompts (pre-built workflows). The service is smart so the LLM doesn't have to be.
 
-The core insight: **the less the LLM has to guess, the better it performs.** Structured errors, intent operations, and self-describing schemas all reduce guesswork. The trade-off is more code and more abstraction — but each piece has a clear purpose and a single owner.
+The skill layer (`.claude/skills/bookshelf/SKILL.md`) completes the picture by encoding *domain expertise* on top of the server's capabilities — so the LLM doesn't rediscover workflow patterns every session.
+
+The core insight: **the less the LLM has to guess, the better it performs.** Structured errors, intent operations, self-describing schemas, and skills all reduce guesswork. The trade-off is more code and more abstraction — but each piece has a clear purpose and a single owner.
